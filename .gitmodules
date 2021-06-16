@@ -1,0 +1,6 @@
+[submodule "Modules/Invoke-Obfuscation"]
+	path = Modules/Invoke-Obfuscation
+	url = https://github.com/danielbohannon/Invoke-Obfuscation.git
+[submodule "Modules/Invoke-DOSfuscation"]
+	path = Modules/Invoke-DOSfuscation
+	url = https://github.com/danielbohannon/Invoke-DOSfuscation.git
