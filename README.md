@@ -15,6 +15,12 @@ The framework as of v0.3.1 contains 10 unique methods for executing Meterpreter 
 Installation
 ------------
 
+Installation can be done by issuing the following commands.  
+```
+pip3 install -r requirements.txt
+sudo apt install -y mono-mcs
+```
+
 Release Notes
 -------------
 
